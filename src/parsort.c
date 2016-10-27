@@ -12,23 +12,135 @@
 #include <time.h>
 #include <math.h>
 #include <mpi.h>
+#include <string.h>
 
+#define MAX_SIZE 1048576
 
-int main(int argc, char *agrv[]) {
-  
+int argError(MPI_Comm comm);
+int cmpfunc (const void * a, const void * b);
+void sortedMerge(double *left, double *right, int size);
+
+int main(int argc, char *argv[]) {
+
   MPI_Init(&argc, &argv);
 
   int myRank;
+  int P;
   int size;
-  char *dataSet;
-  
   MPI_Comm_rank(MPI_COMM_WORLD, &myRank);
-  MPI_Comm_size(MPI_COMM_WORLD, &size);
+  MPI_Comm_size(MPI_COMM_WORLD, &P);
   
+  //printf("argc: %d\n", argc);
+
+  char type;
+  char yorn;
+  double *dataSet;
+  double *localBuffer;  
+  int i = 1;
+  if(argc < 4) { return argError(MPI_COMM_WORLD); }
   
+  size = atoi(argv[i++]);
+  //printf("size: %d\n", size);
+  type = argv[i++][0];
+  //printf("type: %c\n",type);
+  yorn = argv[i++][0];
+  //printf("yorn: %c\n", yorn);
+
+  if(size < 1 || size > MAX_SIZE) { return argError(MPI_COMM_WORLD); }
+  if(type != 'm' && type != 'o') { return argError(MPI_COMM_WORLD); }
+  if(yorn != 'y' && yorn != 'n') { return argError(MPI_COMM_WORLD); }
+  
+
+  //Seed the random number generator
+  //srand((unsigned) time(NULL));
+  //Fill the data set
+  dataSet = malloc(sizeof(double)*P*size);
+  if(myRank == 0) {
+    for(i = 0; i < P*size; i++) {
+      dataSet[i] = ((double) rand()) / RAND_MAX;
+      //printf("%f\n", dataSet[i]);
+    }
+  }
+  localBuffer = malloc(sizeof(double)*size*P);
+
+  // Scatter the data
+  MPI_Scatter(
+    dataSet, size, MPI_DOUBLE,
+    localBuffer, size, MPI_DOUBLE,
+    0, MPI_COMM_WORLD);
+  //printf("Processor %d got datas!\n", myRank);
+  //copy contents of buffer to 'dataset'
+  memcpy(dataSet, localBuffer, sizeof(double)*size);
+  
+  //do local sort
+
+  qsort(dataSet, size, sizeof(double), cmpfunc);
+  //Now we do the complicated part
+  //What this is will vary based on sort type.
+  if(type == 'm') { //do merge sort
+    int gap;
+    for(gap = 1; gap < P; gap *= 2) {
+      //MPI_Barrier(MPI_COMM_WORLD);
+      if ((myRank/gap)%2 != 0) { 
+        //send data to p-gap
+        //printf("gap: %d Proc %d sending to %d\n", gap, myRank, myRank-gap);
+        MPI_Send(dataSet, size*gap,  MPI_DOUBLE,
+                 myRank-gap, 0, MPI_COMM_WORLD);
+        break;
+      } else {
+        //printf("gap: %d Proc %d receiving from %d\n", gap, myRank, myRank+gap);
+        MPI_Recv(localBuffer, size*gap, MPI_DOUBLE,
+                 myRank+gap, 0,
+                 MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        //now do mergeSort with dataSet and localBuffer, storing into dataSet
+        sortedMerge(dataSet, localBuffer, size*gap);
+      }
+    }
+  } else { //do odd/even sort
+    
+  }
 
   if(myRank == 0) {
-    dataSet = malloc(sizeof(double)*size*
+    printf("sorted:\n");
+    for(i = 0; i < P*size; i++) {
+      printf("%f\n", dataSet[i]);
+    }
+  }
+  
+  free(dataSet);
+  free(localBuffer);
+  
+  MPI_Finalize();
+  return 0;
 }
 
+int argError(MPI_Comm comm) {
+  MPI_Abort(comm, -1);
+  return MPI_Finalize();
+}
+
+int cmpfunc(const void * a, const void * b) {
+  if (*(double*)a > *(double*)b) return 1;
+  else if (*(double*)a < *(double*)b) return -1;
+  return 0;
+}
+
+void sortedMerge(double * left, double * right, int size) {
+  int lp = 0;
+  int rp = 0;
+  int i = 0;
+  
+  double *tempArray = malloc(sizeof(double)*size*2); 
+
+  while ( lp < size && rp < size) {
+    if(left[lp] < right[rp]) { tempArray[i++] = left[lp++]; }
+    else { tempArray[i++] = right[rp++]; }
+  }
+
+  while ( lp < size ) { tempArray[i++] = left[lp++]; }
+  while ( rp < size ) { tempArray[i++] = right[rp++]; }
+
+  memcpy(left, tempArray, sizeof(double)*size*2);
+  free(tempArray);
+  return;
 }
