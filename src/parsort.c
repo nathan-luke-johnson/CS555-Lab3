@@ -58,9 +58,10 @@ int main(int argc, char *argv[]) {
   //Fill the data set
   dataSet = malloc(sizeof(double)*P*size);
   if(myRank == 0) {
+    //printf("original:\n");
     for(i = 0; i < P*size; i++) {
       dataSet[i] = ((double) rand()) / RAND_MAX;
-      //printf("%f\n", dataSet[i]);
+      //printf("%f\n", dataSet[i]); //print original for debugging
     }
   }
   localBuffer = malloc(sizeof(double)*size*P);
@@ -76,6 +77,9 @@ int main(int argc, char *argv[]) {
   
   //do local sort
 
+  double startTime;
+  double endTime;
+  startTime = MPI_Wtime();
   qsort(dataSet, size, sizeof(double), cmpfunc);
   //Now we do the complicated part
   //What this is will vary based on sort type.
@@ -100,34 +104,59 @@ int main(int argc, char *argv[]) {
     }
   } else { //do odd/even sort
     for(i = 0; i < P/2; i++) {
+      memcpy(thirdBuffer, localBuffer, sizeof(double)*size);
       if(myRank%2 != 0) {
-        MPI_Sendrecv(localBuffer, size, MPI_DOUBLE,
-                     myRank, myRank-1, 0,
-                     dataSet, size, MPI_DOUBLE,
-                     myRank, 0,
-                     MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        mergeHigh(localBuffer, dataSet, thirdBuffer, size/2);
+        //printf("proc %d sending to %d", myRank, myRank-1);
+        MPI_Send(localBuffer, size, MPI_DOUBLE,
+	         myRank-1, 0, MPI_COMM_WORLD);
+	MPI_Recv(dataSet, size, MPI_DOUBLE,
+	         myRank-1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+	mergeHigh(localBuffer, dataSet, thirdBuffer, size/2);
+	memcpy(localBuffer, thirdBuffer, sizeof(double)*size);
         if(myRank <= P-2) {
-          MPI_Sendrecv();
-          mergeLow();
+	  //printf("proc %d sending to %d", myRank, myRank+1);
+	  MPI_Send(localBuffer, size, MPI_DOUBLE,
+	           myRank+1, 0, MPI_COMM_WORLD);
+	  MPI_Recv(dataSet, size, MPI_DOUBLE,
+	           myRank+1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+          mergeLow(localBuffer, dataSet, thirdBuffer, size/2);
+	  memcpy(localBuffer, thirdBuffer, sizeof(double)*size);
          }
       } else {
-        MPI_Sendrecv();
-        mergeLow();
-        if(myRank >= 1) {
-          MPI_Sendrecv();
-          mergeHigh();
+        //printf("proc %d sending to %d", myRank, myRank+1);
+	MPI_Recv(dataSet, size, MPI_DOUBLE,
+	         myRank+1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+	MPI_Send(localBuffer, size, MPI_DOUBLE,
+	         myRank+1, 0, MPI_COMM_WORLD);
+        mergeLow(localBuffer, dataSet, thirdBuffer, size/2);
+	memcpy(localBuffer, thirdBuffer, sizeof(double)*size);
+        if(myRank >= 1){ 
+	  //printf("proc %d sending to %d", myRank, myRank-1);
+	  MPI_Recv(dataSet, size, MPI_DOUBLE,
+	           myRank-1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+	  MPI_Send(localBuffer, size, MPI_DOUBLE,
+	           myRank-1, 0, MPI_COMM_WORLD);
+          mergeHigh(localBuffer, dataSet, thirdBuffer, size/2);
+	  memcpy(localBuffer, thirdBuffer, sizeof(double)*size);
         }
       }
     }
+    //All together now.
+    MPI_Gather(localBuffer, size, MPI_DOUBLE,
+               dataSet, size, MPI_DOUBLE,
+	       0, MPI_COMM_WORLD);
   }
 
+  endTime = MPI_Wtime();
+
   if(myRank == 0) {
-    printf("sorted:\n");
     if (yorn == 'y') {
-    for(i = 0; i < P*size; i++) {
-      printf("%f\n", dataSet[i]);
-    } }
+      printf("sorted:\n");
+      for(i = 0; i < P*size; i++) {
+        printf("%f\n", dataSet[i]);
+      }
+    }
+    printf("sorting took %f seconds.\n", endTime - startTime);
   }
   
   free(dataSet);
@@ -182,10 +211,10 @@ void sortedMerge(double * left, double * right, int size) {
 void mergeLow(double *a, double *b, double *c, int n) {
   int countA = 0; int countB = 0; int countC = 0;
   while(countC < n) {
-    if(memcmp(a[countA],b[countB],sizeof(double))) {
-       memcpy(c[countC++],a[countA++],sizeof(double));
+    if(cmpfunc(&a[countA],&b[countB])<0) {
+       memcpy(&c[countC++],&a[countA++],sizeof(double));
     } else {
-      memcpy(c[countC++], b[countB++],sizeof(double));
+      memcpy(&c[countC++], &b[countB++],sizeof(double));
     }
   }
 }
@@ -193,11 +222,10 @@ void mergeLow(double *a, double *b, double *c, int n) {
 void mergeHigh(double *a, double *b, double *c, int n) {
   int countA = n-1; int countB = n-1; int countC = n-1;
   while(countC >= 0) {
-    if(memcmp(a[countA],b[countB],sizeof(double))) {
-       memcpy(c[countC--],a[countA--],sizeof(double));
+    if(cmpfunc(&b[countB],&a[countA])<0) {
+       memcpy(&c[countC--],&a[countA--],sizeof(double));
     } else {
-      memcpy(c[countC--], b[countB--],sizeof(double));
+      memcpy(&c[countC--], &b[countB--],sizeof(double));
     }
   }
 }
-
