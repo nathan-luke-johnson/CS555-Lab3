@@ -102,9 +102,10 @@ int main(int argc, char *argv[]) {
 
   if(myRank == 0) {
     printf("sorted:\n");
+    if (yorn == 'y') {
     for(i = 0; i < P*size; i++) {
       printf("%f\n", dataSet[i]);
-    }
+    } }
   }
   
   free(dataSet);
