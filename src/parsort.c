@@ -19,6 +19,8 @@
 int argError(MPI_Comm comm);
 int cmpfunc (const void * a, const void * b);
 void sortedMerge(double *left, double *right, int size);
+void mergeLow(double *a, double *b, double *c, int n);
+void mergeHigh(double *a, double *b, double *c, int n);
 
 int main(int argc, char *argv[]) {
 
@@ -62,7 +64,7 @@ int main(int argc, char *argv[]) {
     }
   }
   localBuffer = malloc(sizeof(double)*size*P);
-
+  double *thirdBuffer = malloc(sizeof(double)*size*P);
   // Scatter the data
   MPI_Scatter(
     dataSet, size, MPI_DOUBLE,
@@ -97,7 +99,27 @@ int main(int argc, char *argv[]) {
       }
     }
   } else { //do odd/even sort
-    
+    for(i = 0; i < P/2; i++) {
+      if(myRank%2 != 0) {
+        MPI_Sendrecv(localBuffer, size, MPI_DOUBLE,
+                     myRank, myRank-1, 0,
+                     dataSet, size, MPI_DOUBLE,
+                     myRank, 0,
+                     MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        mergeHigh(localBuffer, dataSet, thirdBuffer, size/2);
+        if(myRank <= P-2) {
+          MPI_Sendrecv();
+          mergeLow();
+         }
+      } else {
+        MPI_Sendrecv();
+        mergeLow();
+        if(myRank >= 1) {
+          MPI_Sendrecv();
+          mergeHigh();
+        }
+      }
+    }
   }
 
   if(myRank == 0) {
@@ -110,22 +132,32 @@ int main(int argc, char *argv[]) {
   
   free(dataSet);
   free(localBuffer);
+  free(thirdBuffer);
   
   MPI_Finalize();
   return 0;
 }
 
+/*
+ * Just a thing.
+ */
 int argError(MPI_Comm comm) {
   MPI_Abort(comm, -1);
   return MPI_Finalize();
 }
 
+/* 
+ * Comparator function, compares two doubles.
+ */
 int cmpfunc(const void * a, const void * b) {
   if (*(double*)a > *(double*)b) return 1;
   else if (*(double*)a < *(double*)b) return -1;
   return 0;
 }
 
+/* void sortedMerge
+ * Takes two sorted arrays of length <size>, and merges them into the left array.
+ */
 void sortedMerge(double * left, double * right, int size) {
   int lp = 0;
   int rp = 0;
@@ -145,3 +177,27 @@ void sortedMerge(double * left, double * right, int size) {
   free(tempArray);
   return;
 }
+
+
+void mergeLow(double *a, double *b, double *c, int n) {
+  int countA = 0; int countB = 0; int countC = 0;
+  while(countC < n) {
+    if(memcmp(a[countA],b[countB],sizeof(double))) {
+       memcpy(c[countC++],a[countA++],sizeof(double));
+    } else {
+      memcpy(c[countC++], b[countB++],sizeof(double));
+    }
+  }
+}
+
+void mergeHigh(double *a, double *b, double *c, int n) {
+  int countA = n-1; int countB = n-1; int countC = n-1;
+  while(countC >= 0) {
+    if(memcmp(a[countA],b[countB],sizeof(double))) {
+       memcpy(c[countC--],a[countA--],sizeof(double));
+    } else {
+      memcpy(c[countC--], b[countB--],sizeof(double));
+    }
+  }
+}
+
