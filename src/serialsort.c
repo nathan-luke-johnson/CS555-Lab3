@@ -11,20 +11,31 @@
 #define DATA_SET_SIZE 1048576
 //#define DATA_SET_SIZE 1024
 
-int cmpfunc (const void * a, const void * b) {
-  return ( *(char*)a - *(char*)b );
+int cmpfunc(const void * a, const void * b) {
+  if (*(double*)a > *(double*)b) return 1;
+  else if (*(double*)a < *(double*)b) return -1;
+  return 0;
 }
 
 int main(int argc, char *argv[]) {
 
-  char *dataSet;
+  double *dataSet;
+  int dataSetSize = 0;
+  if(argc>1) {
+    dataSetSize = atoi(argv[1]);
+  } else { dataSetSize = DATA_SET_SIZE; }
 
-  dataSet = malloc(sizeof(char)*DATA_SET_SIZE);
+  dataSet = malloc(sizeof(double)*dataSetSize);
 
   int i;
   srand((unsigned) time(NULL));
-  for(i = 0; i < DATA_SET_SIZE; i++) {
-    dataSet[i] = rand() % 26 + 'a';
+  for(i = 0; i < dataSetSize; i++) {
+    dataSet[i] = rand();
   }
-  qsort(dataSet, DATA_SET_SIZE, sizeof(char), cmpfunc);
+  clock_t startTime;
+  clock_t endTime;
+  startTime = clock();
+  qsort(dataSet, dataSetSize, sizeof(double), cmpfunc);
+  endTime = clock();
+  printf("sort took %f seconds.\n", (double)(endTime-startTime)/(double)CLOCKS_PER_SEC);
 }
